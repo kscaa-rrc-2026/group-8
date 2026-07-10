@@ -45,6 +45,15 @@ is already scaffolded on `main` so no one is blocked waiting on it.
 
 ## Getting started (each person)
 
+**Windows shortcut:** after cloning and checking out your branch, double-click
+[run.bat](run.bat) (or run it from a terminal). It installs dependencies,
+sets up `.env` files, generates the Prisma client, runs migrations, seeds
+test data, and starts both dev servers in their own windows — safe to
+re-run any time. Requires Node.js 18.18+ and a reachable PostgreSQL first
+(see prerequisites below).
+
+Manual steps (any OS), if you'd rather not use the script:
+
 ```bash
 git clone https://github.com/kscaa-rrc-2026/group-8.git
 cd group-8
