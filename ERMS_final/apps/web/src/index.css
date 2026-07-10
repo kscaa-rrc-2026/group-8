@@ -1,0 +1,39 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply font-sans antialiased;
+  }
+}
+
+@layer components {
+  /* Status badge — use for ClaimStatus everywhere instead of ad-hoc colors */
+  .badge-pending {
+    @apply bg-amber-100 text-status-pending px-2 py-0.5 rounded-full text-xs font-medium;
+  }
+  .badge-approved {
+    @apply bg-emerald-100 text-status-approved px-2 py-0.5 rounded-full text-xs font-medium;
+  }
+  .badge-rejected {
+    @apply bg-red-100 text-status-rejected px-2 py-0.5 rounded-full text-xs font-medium;
+  }
+  .badge-returned {
+    @apply bg-orange-100 text-status-returned px-2 py-0.5 rounded-full text-xs font-medium;
+  }
+  .badge-paid {
+    @apply bg-blue-100 text-status-paid px-2 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .btn-primary {
+    @apply bg-brand-700 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-brand-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-secondary {
+    @apply bg-white text-brand-700 border border-brand-200 px-4 py-2 rounded-md text-sm font-medium hover:bg-brand-50 transition-colors;
+  }
+
+  .card {
+    @apply bg-white rounded-lg border border-slate-200 shadow-sm;
+  }
+}

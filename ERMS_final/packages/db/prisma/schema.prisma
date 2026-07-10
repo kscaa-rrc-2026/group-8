@@ -1,0 +1,262 @@
+// Single source of truth for the ERMS data model.
+// Propose changes here first — don't fork types in apps/api or apps/web.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ──────────────────────────────────────────────────────────────
+
+enum Role {
+  EMPLOYEE
+  MANAGER
+  ACCOUNTS
+  ADMIN
+  // Top of the org chart - has no managerId. The only role permitted to
+  // approve its own claim, since there's no one else above it to check it.
+  CEO
+}
+
+enum ClaimStatus {
+  DRAFT
+  SUBMITTED
+  MANAGER_APPROVED
+  MANAGER_REJECTED
+  MANAGER_RETURNED
+  ACCOUNTS_VERIFIED
+  ACCOUNTS_REJECTED
+  PAID
+}
+
+enum ApprovalActionType {
+  APPROVE
+  REJECT
+  RETURN
+}
+
+enum NotificationType {
+  CLAIM_SUBMITTED
+  CLAIM_APPROVED
+  CLAIM_REJECTED
+  CLAIM_RETURNED
+  CLAIM_VERIFIED
+  CLAIM_PAID
+  DUPLICATE_FLAGGED
+  GENERAL
+}
+
+enum PaymentMode {
+  BANK_TRANSFER
+  CHEQUE
+  CASH
+}
+
+// ─── Core master data (owned by Admin workstream) ──────────────────────
+
+model Department {
+  id         String     @id @default(cuid())
+  name       String
+  code       String     @unique
+  costCenter String?
+  isActive   Boolean    @default(true)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+  deletedAt  DateTime?
+
+  employees       Employee[]
+  approvalMatrix  ApprovalMatrix[]
+  claims          Claim[]
+}
+
+model Employee {
+  id             String    @id @default(cuid())
+  employeeCode   String    @unique
+  name           String
+  email          String    @unique
+  passwordHash   String
+  role           Role      @default(EMPLOYEE)
+  departmentId   String
+  department     Department @relation(fields: [departmentId], references: [id])
+  managerId      String?
+  manager        Employee? @relation("EmployeeManager", fields: [managerId], references: [id])
+  directReports  Employee[] @relation("EmployeeManager")
+
+  mfaSecret      String?
+  mfaEnabled     Boolean   @default(false)
+  isActive       Boolean   @default(true)
+  lastLoginAt    DateTime?
+  // Forces a password change immediately after login before anything else
+  // is reachable - set true whenever Admin creates an account or resets a
+  // password. Seed accounts are created with this false so testers aren't
+  // interrupted; see requireAuth (apps/api/src/middleware/auth.ts).
+  mustChangePassword     Boolean   @default(true)
+  passwordResetToken     String?   @unique
+  passwordResetExpiresAt DateTime?
+  // Stamped into every JWT at login and re-checked on every request by
+  // requireAuth - if it doesn't match the current DB value, the token was
+  // issued before the most recent password change and is rejected. Without
+  // this, changing your password (the thing you'd do if you suspected
+  // compromise) would do nothing to invalidate a token an attacker already
+  // holds - JWTs are otherwise stateless and have no revocation mechanism.
+  passwordChangedAt DateTime @default(now())
+  // Rolling idle-session tracker updated on every authenticated request by
+  // requireAuth (apps/api/src/middleware/auth.ts). Must live here, not in
+  // the JWT payload - a JWT is immutable once signed, so a value baked into
+  // it can never actually reflect "time since last activity".
+  lastActiveAt   DateTime?
+
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  claims          Claim[]        @relation("ClaimEmployee")
+  approvalSteps   ApprovalStep[] @relation("Approver")
+  paymentsHandled Payment[]      @relation("ProcessedBy")
+  notifications   Notification[]
+  auditLogs       AuditLog[]
+}
+
+model ExpenseCategory {
+  id            String   @id @default(cuid())
+  name          String   @unique
+  requiresBill  Boolean  @default(true)
+  maxAmount     Decimal? @db.Decimal(12, 2)
+  isActive      Boolean  @default(true)
+
+  lineItems ClaimLineItem[]
+}
+
+model ApprovalMatrix {
+  id           String   @id @default(cuid())
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id])
+  minAmount    Decimal  @db.Decimal(12, 2)
+  maxAmount    Decimal  @db.Decimal(12, 2)
+  sequence     Int      // 1 = first approver level, 2 = second, ...
+  approverRole Role
+  isActive     Boolean  @default(true)
+
+  @@index([departmentId, minAmount, maxAmount])
+}
+
+// ─── Claim lifecycle (owned by Employee / Manager / Accounts workstreams) ─
+
+model Claim {
+  id                  String      @id @default(cuid())
+  claimNumber         String      @unique
+  employeeId          String
+  employee            Employee    @relation("ClaimEmployee", fields: [employeeId], references: [id])
+  departmentId        String
+  department          Department  @relation(fields: [departmentId], references: [id])
+
+  totalAmount         Decimal     @db.Decimal(12, 2)
+  status              ClaimStatus @default(DRAFT)
+  currentApprovalStep Int         @default(0)
+  isDuplicateFlagged  Boolean     @default(false)
+  duplicateOfClaimId  String?
+
+  submittedAt         DateTime?
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+  deletedAt           DateTime?
+
+  lineItems      ClaimLineItem[]
+  attachments    Attachment[]
+  approvalSteps  ApprovalStep[]
+  payment        Payment?
+
+  @@index([employeeId, status])
+  @@index([departmentId, status])
+}
+
+model ClaimLineItem {
+  id            String   @id @default(cuid())
+  claimId       String
+  claim         Claim    @relation(fields: [claimId], references: [id])
+  categoryId    String
+  category      ExpenseCategory @relation(fields: [categoryId], references: [id])
+  expenseDate   DateTime
+  amount        Decimal  @db.Decimal(12, 2)
+  description   String?
+  createdAt     DateTime @default(now())
+}
+
+model Attachment {
+  id         String   @id @default(cuid())
+  claimId    String
+  claim      Claim    @relation(fields: [claimId], references: [id])
+  fileName   String
+  fileUrl    String
+  fileHash   String   // sha256 of file content — used for duplicate detection
+  uploadedAt DateTime @default(now())
+
+  @@index([fileHash])
+}
+
+model ApprovalStep {
+  id           String             @id @default(cuid())
+  claimId      String
+  claim        Claim              @relation(fields: [claimId], references: [id])
+  stepNumber   Int
+  approverRole Role
+  approverId   String?
+  approver     Employee?          @relation("Approver", fields: [approverId], references: [id])
+  action       ApprovalActionType?
+  remarks      String?
+  actedAt      DateTime?
+  createdAt    DateTime           @default(now())
+
+  @@index([claimId, stepNumber])
+}
+
+// ─── Payments (owned by Accounts workstream) ────────────────────────────
+
+model Payment {
+  id              String      @id @default(cuid())
+  claimId         String      @unique
+  claim           Claim       @relation(fields: [claimId], references: [id])
+  amount          Decimal     @db.Decimal(12, 2)
+  paymentMode     PaymentMode
+  transactionRef  String?
+  processedById   String
+  processedBy     Employee    @relation("ProcessedBy", fields: [processedById], references: [id])
+  paidAt          DateTime    @default(now())
+}
+
+// ─── Cross-cutting: notifications + immutable audit trail ──────────────
+
+model Notification {
+  id        String            @id @default(cuid())
+  userId    String
+  user      Employee          @relation(fields: [userId], references: [id])
+  type      NotificationType
+  title     String
+  message   String
+  isRead    Boolean           @default(false)
+  createdAt DateTime          @default(now())
+
+  @@index([userId, isRead])
+}
+
+// Append-only. No update/delete should ever be exposed for this model —
+// every mutation in the system writes exactly one row here.
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  user       Employee? @relation(fields: [userId], references: [id])
+  action     String    // e.g. "CLAIM_SUBMIT", "CLAIM_APPROVE", "USER_CREATE"
+  entityType String    // e.g. "Claim", "Employee", "Payment"
+  entityId   String
+  beforeData Json?
+  afterData  Json?
+  ipAddress  String?
+  createdAt  DateTime  @default(now())
+
+  @@index([entityType, entityId])
+  @@index([userId])
+}
