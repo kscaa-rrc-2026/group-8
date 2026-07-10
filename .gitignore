@@ -10,3 +10,8 @@ coverage/
 packages/db/prisma/migrations/dev.db
 uploads/
 price_cache.csv
+
+# Local workshop material and editor config — never publish these.
+CA_Vibe_Coding_Opening_Session.pdf
+Likely Case Studies.docx
+.claude/
