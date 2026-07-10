@@ -8,10 +8,12 @@
 #      installed-but-stopped, otherwise install via winget.
 #   3. npm install (skipped if already done).
 #   4. Create apps/api/.env and packages/db/.env from .env.example if missing.
-#   5. Generate the Prisma client and apply the already-committed migrations
-#      (non-interactive — this repo ships with its migration history intact,
-#      so there's never a "create the first migration" step for a fresh
-#      clone the way there was during initial development).
+#   5. Generate the Prisma client and apply the already-committed migrations.
+#      If PostgreSQL was already installed on this machine (with its own
+#      password, and without this project's database created yet), this
+#      step detects that, creates the database if needed, and prompts for
+#      the correct password if the default one is wrong — rather than
+#      just failing.
 #   6. Seed the 5 demo accounts (safe to re-run — it upserts).
 #   7. Start the API and web dev servers in their own windows and open the
 #      browser.
@@ -46,6 +48,27 @@ function Fail($message) {
     Write-Host "[ERROR] $message" -ForegroundColor Red
     Read-Host "Press Enter to close"
     exit 1
+}
+
+# Runs a command through cmd.exe with its OWN redirection (`> file 2>&1`)
+# rather than PowerShell's `2>&1` operator. In Windows PowerShell 5.1,
+# piping a native command's stderr through PowerShell's own `2>&1` wraps
+# every line as a terminating NativeCommandError — which, combined with
+# $ErrorActionPreference = "Stop", would abort the script on the first
+# warning a tool prints to stderr, even on success. Redirecting at the
+# cmd.exe level avoids that entirely: PowerShell only ever sees one plain
+# external process.
+function Invoke-Logged($command) {
+    $logFile = [System.IO.Path]::GetTempFileName()
+    try {
+        cmd /c "$command > `"$logFile`" 2>&1"
+        $exitCode = $LASTEXITCODE
+        $output = Get-Content $logFile -Raw -ErrorAction SilentlyContinue
+        Write-Host $output
+        return [PSCustomObject]@{ ExitCode = $exitCode; Output = $output }
+    } finally {
+        Remove-Item $logFile -Force -ErrorAction SilentlyContinue
+    }
 }
 
 Write-Host "============================================" -ForegroundColor Yellow
@@ -126,20 +149,107 @@ if (-not (Test-Path "packages\db\.env")) {
     Copy-Item ".env.example" "packages\db\.env"
     Write-Host "Created packages\db\.env from .env.example."
 }
-Write-Host "If your PostgreSQL connection differs from the default (postgres/postgres on localhost:5432),"
-Write-Host "edit DATABASE_URL in both files before continuing."
 
-# ─── 5. Prisma generate + migrate ────────────────────────────────────────
+# ─── 5. Prisma generate + migrate (self-healing) ────────────────────────
 Write-Step "5/6  Database schema"
-npm run db:generate
-if ($LASTEXITCODE -ne 0) { Fail "Prisma generate failed. Check DATABASE_URL in apps\api\.env and packages\db\.env." }
 
-# This repo ships with its full migration history already committed, so
-# `migrate deploy` (non-interactive, just applies what's there) is always
-# the right command here — never `migrate dev`, which would prompt for a
-# migration name if it ever saw uncommitted schema drift.
-npm run db:migrate:deploy
-if ($LASTEXITCODE -ne 0) { Fail "Migration failed. Is PostgreSQL running and is DATABASE_URL correct in apps\api\.env / packages\db\.env?" }
+function Get-DatabaseUrlParts {
+    # Both .env files carry the same DATABASE_URL — read from either one.
+    $line = Get-Content "packages\db\.env" -ErrorAction SilentlyContinue | Where-Object { $_ -match '^\s*DATABASE_URL\s*=' } | Select-Object -First 1
+    if (-not $line) { return $null }
+    $url = ($line -split '=', 2)[1].Trim().Trim('"')
+    if ($url -match 'postgresql://([^:]+):([^@]+)@([^:/]+):(\d+)/([^?]+)') {
+        return [PSCustomObject]@{ User = $matches[1]; Password = $matches[2]; HostName = $matches[3]; Port = $matches[4]; Database = $matches[5] }
+    }
+    return $null
+}
+
+function Set-DatabaseUrlPassword($newPassword) {
+    foreach ($envFile in @("apps\api\.env", "packages\db\.env")) {
+        if (-not (Test-Path $envFile)) { continue }
+        $updated = Get-Content $envFile | ForEach-Object {
+            if ($_ -match '^\s*DATABASE_URL\s*=') {
+                $url = ($_ -split '=', 2)[1].Trim().Trim('"')
+                if ($url -match '^(postgresql://[^:]+):[^@]+@(.*)$') {
+                    "DATABASE_URL=`"$($matches[1]):$newPassword@$($matches[2])`""
+                } else { $_ }
+            } else { $_ }
+        }
+        Set-Content $envFile $updated
+    }
+}
+
+function Test-TargetDatabaseExists($parts) {
+    $env:PGPASSWORD = $parts.Password
+    $result = & psql -U $parts.User -h $parts.HostName -p $parts.Port -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$($parts.Database)'" 2>$null
+    return ($result -match "1")
+}
+
+function New-TargetDatabase($parts) {
+    $env:PGPASSWORD = $parts.Password
+    & psql -U $parts.User -h $parts.HostName -p $parts.Port -d postgres -c "CREATE DATABASE `"$($parts.Database)`";" 2>$null | Out-Null
+    return $LASTEXITCODE -eq 0
+}
+
+# If PostgreSQL was already installed on this machine (rather than by step
+# 2 above), it almost certainly doesn't have this project's database
+# created yet, and may use a different superuser password than the
+# 'postgres' default in .env.example. Handle both without just failing.
+$dbParts = Get-DatabaseUrlParts
+$hasPsql = Test-CommandExists "psql"
+if ($dbParts -and $hasPsql -and -not (Test-TargetDatabaseExists $dbParts)) {
+    Write-Host "Database '$($dbParts.Database)' doesn't exist yet on this PostgreSQL server - creating it..."
+    if (New-TargetDatabase $dbParts) {
+        Write-Host "Created."
+    } else {
+        Write-Host "[WARNING] Couldn't create it automatically (likely a password issue) - the next step will confirm." -ForegroundColor Yellow
+    }
+}
+
+$maxAttempts = 3
+$succeeded = $false
+for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+    $gen = Invoke-Logged "npm run db:generate"
+    $result = $gen
+    if ($gen.ExitCode -eq 0) {
+        $mig = Invoke-Logged "npm run db:migrate:deploy"
+        $result = $mig
+        if ($mig.ExitCode -eq 0) { $succeeded = $true; break }
+    }
+
+    if ($result.Output -match "P1000" -or $result.Output -match "Authentication failed") {
+        Write-Host ""
+        Write-Host "[!] PostgreSQL rejected the password in DATABASE_URL." -ForegroundColor Yellow
+        Write-Host "    PostgreSQL was already installed on this machine with a different password" -ForegroundColor Yellow
+        Write-Host "    than this project's default ('postgres')." -ForegroundColor Yellow
+        $newPassword = Read-Host "    Enter the correct 'postgres' superuser password for THIS machine's PostgreSQL"
+        if ([string]::IsNullOrWhiteSpace($newPassword)) {
+            Fail "Cannot continue without the correct password. Edit DATABASE_URL manually in apps\api\.env and packages\db\.env, then re-run this script."
+        }
+        Set-DatabaseUrlPassword $newPassword
+        $dbParts = Get-DatabaseUrlParts
+        if ($dbParts -and $hasPsql -and -not (Test-TargetDatabaseExists $dbParts)) {
+            New-TargetDatabase $dbParts | Out-Null
+        }
+        continue
+    }
+    if ($result.Output -match "P1003" -or $result.Output -match "does not exist") {
+        if ($dbParts -and $hasPsql) {
+            Write-Host "Database doesn't exist - creating it and retrying..."
+            New-TargetDatabase $dbParts | Out-Null
+            continue
+        }
+        Fail "The database doesn't exist and couldn't be created automatically (psql not found on PATH). Create it manually, or install PostgreSQL's command-line tools, then re-run this script."
+    }
+    if ($result.Output -match "P1001" -or $result.Output -match "ECONNREFUSED") {
+        Fail "Can't reach PostgreSQL at the host/port in DATABASE_URL. Make sure PostgreSQL is running, then re-run this script."
+    }
+    Fail "Database setup failed. See the output above."
+}
+
+if (-not $succeeded) {
+    Fail "Database setup failed after $maxAttempts attempts."
+}
 
 npm run db:seed
 
