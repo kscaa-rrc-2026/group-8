@@ -73,10 +73,13 @@ npm run dev:api      # in one terminal
 npm run dev:web      # in another
 ```
 
-On Windows, `run.bat` automates all of the above (installs dependencies,
-sets up `.env` files, runs migrations/seed, and starts both servers) —
-just double-click it or run it from a terminal, after Node.js and
-PostgreSQL are installed.
+On Windows, `run.bat` automates all of the above — it installs Node.js
+and PostgreSQL automatically if either is missing, installs
+dependencies, sets up `.env` files, runs migrations/seed, and starts
+both servers. Just double-click it or run it from a terminal. If
+PostgreSQL was already installed under different credentials than this
+project's default, it detects that and prompts you for the correct
+password instead of failing. Safe to re-run any time.
 
 ### Seeded accounts
 
