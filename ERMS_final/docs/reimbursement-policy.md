@@ -25,7 +25,7 @@ Food line and a ₹20,000 Travel line is fine; a ₹2,500 Food line is
 rejected at submission with a clear error, before it ever reaches a
 manager. Admin can adjust these limits or add categories going forward
 (current UI supports viewing them; changing limits today requires a
-direct data update — see the Admin workstream's open items).
+direct data update — an edit form is on the roadmap).
 
 ## 3. Mandatory bill attachment
 
@@ -129,7 +129,7 @@ cut off arbitrarily while a genuinely idle one is.
 
 Finance/Accounts and Admin can generate Employee-wise, Department-wise,
 Monthly, Payment, and Rejected reports, each exportable as CSV (Excel/PDF
-export are on the roadmap — see the Reports workstream's open items).
+export are on the roadmap).
 
 ## 11. What's on the roadmap, not yet enforced
 

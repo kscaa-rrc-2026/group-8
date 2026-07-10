@@ -41,8 +41,8 @@ model and `ClaimStatus`/`ApprovalActionType` enums.
 - **Session timeout**: JWT carries a `lastActiveAt` claim; `requireAuth`
   rejects a technically-valid token once it's idle past
   `SESSION_IDLE_TIMEOUT_MIN`.
-- **MFA**: TOTP via `otplib`, `Employee.mfaSecret`/`mfaEnabled` — enrollment
-  flow is a TODO in the admin module (see its CLAUDE.md).
+- **MFA**: TOTP via `otplib`, `Employee.mfaSecret`/`mfaEnabled` — the
+  schema has the fields, but the enrollment flow is not yet built.
 - **Mandatory bill attachments + remarks**: enforced both client-side (form
   validation) and server-side (`ApiError` thrown if missing) — see
   `apps/api/src/modules/employee/routes.ts` and
@@ -58,4 +58,4 @@ model and `ClaimStatus`/`ApprovalActionType` enums.
 - AI-based duplicate/fraud detection — augments (doesn't replace) the
   deterministic check in the accounts module.
 
-Neither is scaffolded yet; don't block the 5 workstreams on them.
+Neither is scaffolded yet.
