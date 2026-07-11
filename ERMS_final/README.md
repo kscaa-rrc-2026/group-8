@@ -30,6 +30,8 @@ docs/
   reimbursement-policy.md    Every business rule actually enforced in the code
   judges-faq.pdf             Anticipated Q&A on architecture, security, and decisions
   user-guide.pdf             Step-by-step usage guide per role + end-user FAQ
+  project-brief.pdf          Competition presentation brief: stack choices vs.
+                              alternatives, hosting plan, UI/UX, judge Q&A prep
 ```
 
 ## What's implemented
