@@ -14,7 +14,6 @@ interface Claim {
 export function ClaimHistory() {
   const [claims, setClaims] = useState<Claim[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   function refresh() {
     api
@@ -25,16 +24,6 @@ export function ClaimHistory() {
 
   useEffect(refresh, []);
 
-  async function resubmit(claimId: string) {
-    setError(null);
-    try {
-      await api.post(`/employee/claims/${claimId}/resubmit`);
-      refresh();
-    } catch (err: any) {
-      setError(err?.response?.data?.error?.message ?? "Failed to resubmit claim");
-    }
-  }
-
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
@@ -43,8 +32,6 @@ export function ClaimHistory() {
           New Claim
         </Link>
       </div>
-
-      {error && <div className="badge-rejected mb-4 block w-fit">{error}</div>}
 
       <div className="card overflow-hidden">
         <table className="w-full text-sm">
@@ -82,9 +69,9 @@ export function ClaimHistory() {
                 <td className="px-4 py-2 text-slate-500">{new Date(claim.createdAt).toLocaleDateString()}</td>
                 <td className="px-4 py-2 text-right">
                   {claim.status === "MANAGER_RETURNED" && (
-                    <button onClick={() => resubmit(claim.id)} className="btn-secondary text-xs">
-                      Resubmit
-                    </button>
+                    <Link to={`/employee/claims/${claim.id}/edit`} className="btn-secondary text-xs">
+                      Edit &amp; Resubmit
+                    </Link>
                   )}
                 </td>
               </tr>

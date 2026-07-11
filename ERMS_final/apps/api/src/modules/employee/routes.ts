@@ -98,6 +98,20 @@ employeeRouter.post("/claims", async (req, res, next) => {
   }
 });
 
+// PUT /api/employee/claims/:id — Edit screen for a DRAFT or MANAGER_RETURNED
+// claim. Replaces the line items entirely rather than patching individual
+// ones, matching how the New Claim form already builds the whole list
+// client-side.
+employeeRouter.put("/claims/:id", async (req, res, next) => {
+  try {
+    const { lineItems } = createClaimSchema.parse(req.body);
+    const claim = await employeeService.updateClaimLineItems(req, req.user!, req.params.id, lineItems);
+    res.json({ data: claim });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // POST /api/employee/claims/:id/attachments — Upload Bills screen.
 employeeRouter.post("/claims/:id/attachments", requireOwnedEditableClaim, upload.single("file"), async (req, res, next) => {
   try {
@@ -119,6 +133,18 @@ employeeRouter.post("/claims/:id/attachments", requireOwnedEditableClaim, upload
     });
 
     res.status(201).json({ data: attachment });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/employee/claims/:id/attachments/:attachmentId — lets the
+// employee remove a wrongly-attached bill while editing a returned claim,
+// same editable window as uploading one (requireOwnedEditableClaim).
+employeeRouter.delete("/claims/:id/attachments/:attachmentId", requireOwnedEditableClaim, async (req, res, next) => {
+  try {
+    await employeeService.deleteAttachment(req, req.user!, req.params.id, req.params.attachmentId);
+    res.status(204).send();
   } catch (err) {
     next(err);
   }

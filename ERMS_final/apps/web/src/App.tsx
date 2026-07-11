@@ -70,6 +70,7 @@ export function App() {
 
         <Route path="/employee/dashboard" element={<Dashboard />} />
         <Route path="/employee/claims/new" element={<NewClaim />} />
+        <Route path="/employee/claims/:id/edit" element={<NewClaim />} />
         <Route path="/employee/claims" element={<ClaimHistory />} />
         <Route path="/employee/notifications" element={<Notifications />} />
 

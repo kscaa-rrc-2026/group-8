@@ -1,7 +1,10 @@
 import type { Request } from "express";
+import fs from "fs";
+import path from "path";
 import { prisma } from "../../lib/prisma";
 import { recordAuditLog } from "../../middleware/auditLog";
 import { ApiError } from "../../middleware/errorHandler";
+import { UPLOADS_ROOT } from "../../lib/uploads";
 import type { AuthUser } from "../../types";
 
 interface LineItemInput {
@@ -38,11 +41,12 @@ export async function getMyClaim(user: AuthUser, claimId: string) {
   return claim;
 }
 
-// Reference pattern for the whole app: validate, write the change, then
-// record an audit log entry for it in the same request. Created as DRAFT,
-// not SUBMITTED - submitClaim() is what actually puts it in front of a
-// manager, and it refuses to do that without a bill attached.
-export async function createClaim(req: Request, user: AuthUser, lineItems: LineItemInput[]) {
+// Shared by createClaim and updateClaimLineItems - checks every category
+// exists and every line item is within its category's per-line limit, then
+// returns the rounded total. Round to paise - amount arrives as a JS float
+// over the wire, and summing floats can leave rounding dust (e.g. 0.1 + 0.2)
+// in a total that should be exact currency.
+async function validateLineItemsAndComputeTotal(lineItems: LineItemInput[]): Promise<number> {
   if (lineItems.length === 0) {
     throw new ApiError(400, "A claim needs at least one line item");
   }
@@ -62,10 +66,15 @@ export async function createClaim(req: Request, user: AuthUser, lineItems: LineI
     }
   }
 
-  // Round to paise - lineItems.amount arrives as a JS float over the wire,
-  // and summing floats can leave rounding dust (e.g. 0.1 + 0.2) in a total
-  // that should be exact currency.
-  const totalAmount = Math.round(lineItems.reduce((sum, item) => sum + item.amount, 0) * 100) / 100;
+  return Math.round(lineItems.reduce((sum, item) => sum + item.amount, 0) * 100) / 100;
+}
+
+// Reference pattern for the whole app: validate, write the change, then
+// record an audit log entry for it in the same request. Created as DRAFT,
+// not SUBMITTED - submitClaim() is what actually puts it in front of a
+// manager, and it refuses to do that without a bill attached.
+export async function createClaim(req: Request, user: AuthUser, lineItems: LineItemInput[]) {
+  const totalAmount = await validateLineItemsAndComputeTotal(lineItems);
   const claimNumber = `CLM-${Date.now()}`;
 
   const claim = await prisma.claim.create({
@@ -141,4 +150,74 @@ export async function resubmitClaim(req: Request, user: AuthUser, claimId: strin
   await recordAuditLog({ req, action: "CLAIM_RESUBMIT", entityType: "Claim", entityId: claim.id, before: { status: claim.status }, after: { status: updated.status } });
 
   return updated;
+}
+
+// Lets the employee actually fix what the manager's remarks called out
+// before resubmitting, instead of resubmitting the exact same line items
+// unchanged. Same editable window as attachments (requireOwnedEditableClaim
+// in routes.ts): DRAFT or MANAGER_RETURNED only - once a claim has moved
+// past that, its line items are part of the record a manager already acted
+// on and can't be silently rewritten.
+export async function updateClaimLineItems(req: Request, user: AuthUser, claimId: string, lineItems: LineItemInput[]) {
+  const claim = await prisma.claim.findFirst({
+    where: { id: claimId, employeeId: user.id, deletedAt: null },
+    include: { lineItems: true },
+  });
+  if (!claim) throw new ApiError(404, "Claim not found");
+  if (claim.status !== "DRAFT" && claim.status !== "MANAGER_RETURNED") {
+    throw new ApiError(409, `Cannot edit a claim in status ${claim.status}`);
+  }
+
+  const totalAmount = await validateLineItemsAndComputeTotal(lineItems);
+
+  const updated = await prisma.$transaction(async (tx) => {
+    await tx.claimLineItem.deleteMany({ where: { claimId } });
+    await tx.claimLineItem.createMany({
+      data: lineItems.map((item) => ({
+        claimId,
+        categoryId: item.categoryId,
+        expenseDate: new Date(item.expenseDate),
+        amount: item.amount,
+        description: item.description,
+      })),
+    });
+    return tx.claim.update({
+      where: { id: claimId },
+      data: { totalAmount },
+      include: { lineItems: true, attachments: true },
+    });
+  });
+
+  await recordAuditLog({
+    req,
+    action: "CLAIM_UPDATE",
+    entityType: "Claim",
+    entityId: claim.id,
+    before: { lineItems: claim.lineItems, totalAmount: claim.totalAmount },
+    after: { lineItems: updated.lineItems, totalAmount: updated.totalAmount },
+  });
+
+  return updated;
+}
+
+// Lets the employee remove a wrongly-attached bill before resubmitting -
+// same editable window as adding one. Deletes the DB row first; the file
+// itself is best-effort cleanup, since a claim's validity never depends on
+// the file actually being gone from disk.
+export async function deleteAttachment(req: Request, user: AuthUser, claimId: string, attachmentId: string) {
+  const claim = await prisma.claim.findFirst({ where: { id: claimId, employeeId: user.id, deletedAt: null } });
+  if (!claim) throw new ApiError(404, "Claim not found");
+  if (claim.status !== "DRAFT" && claim.status !== "MANAGER_RETURNED") {
+    throw new ApiError(409, `Cannot remove an attachment from a claim in status ${claim.status}`);
+  }
+
+  const attachment = await prisma.attachment.findFirst({ where: { id: attachmentId, claimId } });
+  if (!attachment) throw new ApiError(404, "Attachment not found");
+
+  await prisma.attachment.delete({ where: { id: attachmentId } });
+  await recordAuditLog({ req, action: "ATTACHMENT_DELETE", entityType: "Attachment", entityId: attachmentId, before: attachment });
+
+  fs.unlink(path.join(UPLOADS_ROOT, attachment.fileUrl), () => {});
+
+  return attachment;
 }
