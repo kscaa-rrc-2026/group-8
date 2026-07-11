@@ -5,6 +5,7 @@ import { prisma } from "../../lib/prisma";
 import { recordAuditLog } from "../../middleware/auditLog";
 import { ApiError } from "../../middleware/errorHandler";
 import { UPLOADS_ROOT } from "../../lib/uploads";
+import { createNotification } from "../../lib/notifications";
 import type { AuthUser } from "../../types";
 
 interface LineItemInput {
@@ -107,7 +108,7 @@ export async function createClaim(req: Request, user: AuthUser, lineItems: LineI
 export async function submitClaim(req: Request, user: AuthUser, claimId: string) {
   const claim = await prisma.claim.findFirst({
     where: { id: claimId, employeeId: user.id, deletedAt: null },
-    include: { attachments: true },
+    include: { attachments: true, employee: { select: { managerId: true, name: true } } },
   });
   if (!claim) throw new ApiError(404, "Claim not found");
   if (claim.status !== "DRAFT") {
@@ -124,6 +125,18 @@ export async function submitClaim(req: Request, user: AuthUser, claimId: string)
 
   await recordAuditLog({ req, action: "CLAIM_SUBMIT", entityType: "Claim", entityId: claim.id, before: { status: claim.status }, after: { status: updated.status } });
 
+  // No manager to notify for the CEO, who has none above them and
+  // self-approves - createNotification would otherwise be called with a
+  // null userId.
+  if (claim.employee.managerId) {
+    await createNotification(
+      claim.employee.managerId,
+      "CLAIM_SUBMITTED",
+      "New claim submitted",
+      `${claim.employee.name} submitted claim ${claim.claimNumber} for ₹${claim.totalAmount}, awaiting your review.`,
+    );
+  }
+
   return updated;
 }
 
@@ -132,7 +145,7 @@ export async function submitClaim(req: Request, user: AuthUser, claimId: string)
 export async function resubmitClaim(req: Request, user: AuthUser, claimId: string) {
   const claim = await prisma.claim.findFirst({
     where: { id: claimId, employeeId: user.id, deletedAt: null },
-    include: { attachments: true },
+    include: { attachments: true, employee: { select: { managerId: true, name: true } } },
   });
   if (!claim) throw new ApiError(404, "Claim not found");
   if (claim.status !== "MANAGER_RETURNED") {
@@ -148,6 +161,15 @@ export async function resubmitClaim(req: Request, user: AuthUser, claimId: strin
   });
 
   await recordAuditLog({ req, action: "CLAIM_RESUBMIT", entityType: "Claim", entityId: claim.id, before: { status: claim.status }, after: { status: updated.status } });
+
+  if (claim.employee.managerId) {
+    await createNotification(
+      claim.employee.managerId,
+      "CLAIM_SUBMITTED",
+      "Claim resubmitted",
+      `${claim.employee.name} resubmitted claim ${claim.claimNumber} for ₹${claim.totalAmount} after your return, awaiting your review.`,
+    );
+  }
 
   return updated;
 }

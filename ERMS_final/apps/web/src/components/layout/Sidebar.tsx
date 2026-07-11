@@ -20,6 +20,7 @@ const NAV_BY_ROLE: Record<Role, NavItem[]> = {
     { to: "/manager/approvals", label: "Approval Queue" },
     { to: "/manager/summary", label: "Approval Summary" },
     { to: "/employee/claims", label: "My Claims" },
+    { to: "/employee/notifications", label: "Notifications" },
   ],
   ACCOUNTS: [
     { to: "/accounts/verification", label: "Verification" },
@@ -40,6 +41,7 @@ const NAV_BY_ROLE: Record<Role, NavItem[]> = {
     { to: "/manager/summary", label: "Approval Summary" },
     { to: "/employee/claims/new", label: "New Claim" },
     { to: "/employee/claims", label: "Claim History" },
+    { to: "/employee/notifications", label: "Notifications" },
   ],
 };
 

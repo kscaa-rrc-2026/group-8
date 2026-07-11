@@ -6,6 +6,7 @@ interface Claim {
   id: string;
   claimNumber: string;
   totalAmount: string;
+  approvedAmount: string | null;
   status: ClaimStatus;
   employee: { name: string };
 }
@@ -46,7 +47,7 @@ export function PaymentProcessing() {
             <tr>
               <th className="px-4 py-2 font-medium">Claim #</th>
               <th className="px-4 py-2 font-medium">Employee</th>
-              <th className="px-4 py-2 font-medium">Amount</th>
+              <th className="px-4 py-2 font-medium">Amount to pay</th>
               <th className="px-4 py-2 font-medium">Status</th>
               <th className="px-4 py-2 font-medium">Payment mode</th>
               <th className="px-4 py-2" />
@@ -64,7 +65,12 @@ export function PaymentProcessing() {
               <tr key={claim.id} className="border-t border-slate-100">
                 <td className="px-4 py-2 font-medium text-slate-700">{claim.claimNumber}</td>
                 <td className="px-4 py-2">{claim.employee.name}</td>
-                <td className="px-4 py-2">₹{claim.totalAmount}</td>
+                <td className="px-4 py-2">
+                  ₹{claim.approvedAmount ?? claim.totalAmount}
+                  {claim.approvedAmount !== null && Number(claim.approvedAmount) < Number(claim.totalAmount) && (
+                    <div className="text-xs text-slate-400">Claimed ₹{claim.totalAmount}</div>
+                  )}
+                </td>
                 <td className="px-4 py-2">
                   <StatusBadge status={claim.status} />
                 </td>

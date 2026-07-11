@@ -3,6 +3,7 @@ import { prisma } from "../../lib/prisma";
 import { recordAuditLog } from "../../middleware/auditLog";
 import { ApiError } from "../../middleware/errorHandler";
 import { SAFE_EMPLOYEE_SELECT } from "../../lib/employeeSelect";
+import { createNotification } from "../../lib/notifications";
 import type { AuthUser } from "../../types";
 
 export async function listPendingVerification() {
@@ -131,6 +132,13 @@ export async function decideVerification(req: Request, user: AuthUser, claimId: 
     after: { status: updatedClaim.status, remarks },
   });
 
+  await createNotification(
+    claim.employeeId,
+    decision === "VERIFY" ? "CLAIM_VERIFIED" : "CLAIM_REJECTED",
+    decision === "VERIFY" ? "Claim verified by Accounts" : "Claim rejected by Accounts",
+    `Accounts ${decision === "VERIFY" ? "verified" : "rejected"} claim ${claim.claimNumber}: ${remarks}`,
+  );
+
   return updatedClaim;
 }
 
@@ -160,10 +168,14 @@ export async function processPayment(
     if (count === 0) {
       throw new ApiError(409, "Claim was already paid or its status changed");
     }
+    // Pay the manager-approved amount, not the originally claimed total -
+    // a partial approval means only that portion was ever authorized.
+    // approvedAmount is only null for claims approved before this field
+    // existed; totalAmount is the correct fallback for those.
     return tx.payment.create({
       data: {
         claimId: claim.id,
-        amount: claim.totalAmount,
+        amount: claim.approvedAmount ?? claim.totalAmount,
         paymentMode: input.paymentMode,
         transactionRef: input.transactionRef,
         processedById: user.id,
@@ -172,6 +184,13 @@ export async function processPayment(
   });
 
   await recordAuditLog({ req, action: "CLAIM_PAID", entityType: "Claim", entityId: claim.id, after: payment });
+
+  await createNotification(
+    claim.employeeId,
+    "CLAIM_PAID",
+    "Payment processed",
+    `Your claim ${claim.claimNumber} has been paid: ₹${payment.amount} via ${input.paymentMode}${input.transactionRef ? ` (ref: ${input.transactionRef})` : ""}.`,
+  );
 
   return payment;
 }

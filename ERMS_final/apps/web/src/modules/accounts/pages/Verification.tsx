@@ -6,6 +6,7 @@ interface Claim {
   id: string;
   claimNumber: string;
   totalAmount: string;
+  approvedAmount: string | null;
   status: ClaimStatus;
   isDuplicateFlagged: boolean;
   employee: { name: string };
@@ -59,7 +60,10 @@ export function Verification() {
             <div key={claim.id} className="card p-4">
               <div className="flex items-center justify-between mb-2">
                 <div className="font-medium text-slate-800">
-                  {claim.claimNumber} · {claim.employee.name} · ₹{claim.totalAmount}
+                  {claim.claimNumber} · {claim.employee.name} · Claimed ₹{claim.totalAmount}
+                  {claim.approvedAmount !== null && Number(claim.approvedAmount) < Number(claim.totalAmount) && (
+                    <span className="text-amber-600"> · Manager-approved ₹{claim.approvedAmount}</span>
+                  )}
                 </div>
                 <StatusBadge status={claim.status} />
               </div>

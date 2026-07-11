@@ -62,6 +62,7 @@ managerRouter.get("/summary", async (req, res, next) => {
           claimNumber: c.claimNumber,
           employeeName: c.employeeName,
           totalAmount: c.totalAmount,
+          approvedAmount: c.approvedAmount ?? "",
           decision: c.decision,
           currentStatus: c.currentStatus,
           remarks: c.remarks,
@@ -78,13 +79,19 @@ managerRouter.get("/summary", async (req, res, next) => {
 const decisionSchema = z.object({
   decision: z.enum(["APPROVE", "REJECT", "RETURN"]),
   remarks: z.string().min(1, "Remarks are required"),
+  // Only meaningful for APPROVE - lets a manager approve less than the full
+  // claimed amount. Omit (or send the full total) for a normal full approval.
+  approvedAmount: z.number().positive().optional(),
 });
 
-// POST /api/manager/approvals/:id/decision — Approve / Reject / Return with remarks
+// POST /api/manager/approvals/:id/decision — Approve / Reject / Return with
+// remarks. An APPROVE decision may include approvedAmount to approve only
+// part of the claimed total; decideClaim validates it against the claim's
+// totalAmount.
 managerRouter.post("/approvals/:id/decision", async (req, res, next) => {
   try {
-    const { decision, remarks } = decisionSchema.parse(req.body);
-    const claim = await managerService.decideClaim(req, req.user!, req.params.id, decision, remarks);
+    const { decision, remarks, approvedAmount } = decisionSchema.parse(req.body);
+    const claim = await managerService.decideClaim(req, req.user!, req.params.id, decision, remarks, approvedAmount);
     res.json({ data: claim });
   } catch (err) {
     next(err);

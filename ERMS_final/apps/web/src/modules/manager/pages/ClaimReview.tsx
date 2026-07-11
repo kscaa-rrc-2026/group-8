@@ -20,11 +20,15 @@ export function ClaimReview() {
   const navigate = useNavigate();
   const [claim, setClaim] = useState<ClaimDetail | null>(null);
   const [remarks, setRemarks] = useState("");
+  const [approvedAmount, setApprovedAmount] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    api.get(`/manager/approvals/${id}`).then((res) => setClaim(res.data.data));
+    api.get(`/manager/approvals/${id}`).then((res) => {
+      setClaim(res.data.data);
+      setApprovedAmount(res.data.data.totalAmount);
+    });
   }, [id]);
 
   // The API requires a Bearer token, which a plain <a href> click can't
@@ -42,9 +46,20 @@ export function ClaimReview() {
       setError("Remarks are required for every decision.");
       return;
     }
+    if (decision === "APPROVE") {
+      const amount = Number(approvedAmount);
+      if (!amount || amount <= 0 || amount > Number(claim!.totalAmount)) {
+        setError(`Approved amount must be between ₹0 and the claimed amount (₹${claim!.totalAmount}).`);
+        return;
+      }
+    }
     setSubmitting(true);
     try {
-      await api.post(`/manager/approvals/${id}/decision`, { decision, remarks });
+      await api.post(`/manager/approvals/${id}/decision`, {
+        decision,
+        remarks,
+        ...(decision === "APPROVE" ? { approvedAmount: Number(approvedAmount) } : {}),
+      });
       navigate("/manager/approvals");
     } catch (err: any) {
       setError(err?.response?.data?.error?.message ?? "Failed to record decision");
@@ -103,6 +118,20 @@ export function ClaimReview() {
 
       <div className="card p-6">
         {error && <div className="badge-rejected mb-3 block w-fit">{error}</div>}
+
+        <label className="block text-sm font-medium text-slate-700 mb-1">
+          Approved amount <span className="text-slate-400 font-normal">(only used if you Approve — defaults to the full claimed amount; lower it for a partial approval)</span>
+        </label>
+        <input
+          type="number"
+          step="0.01"
+          min="0"
+          max={claim.totalAmount}
+          value={approvedAmount}
+          onChange={(e) => setApprovedAmount(e.target.value)}
+          className="w-40 border border-slate-300 rounded-md px-3 py-2 text-sm mb-4"
+        />
+
         <label className="block text-sm font-medium text-slate-700 mb-1">Remarks (required)</label>
         <textarea
           value={remarks}

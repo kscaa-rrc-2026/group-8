@@ -3,6 +3,7 @@ import { prisma } from "../../lib/prisma";
 import { recordAuditLog } from "../../middleware/auditLog";
 import { ApiError } from "../../middleware/errorHandler";
 import { SAFE_EMPLOYEE_SELECT } from "../../lib/employeeSelect";
+import { createNotification } from "../../lib/notifications";
 import type { AuthUser } from "../../types";
 
 // A claim is only ever this manager's to approve if they are the specific
@@ -41,6 +42,7 @@ export async function getApprovalSummary(user: AuthUser) {
     claimNumber: s.claim.claimNumber,
     employeeName: s.claim.employee.name,
     totalAmount: s.claim.totalAmount,
+    approvedAmount: s.approvedAmount,
     decision: s.action,
     currentStatus: s.claim.status,
     remarks: s.remarks,
@@ -79,7 +81,20 @@ const STATUS_BY_DECISION: Record<Decision, string> = {
   RETURN: "MANAGER_RETURNED",
 };
 
-export async function decideClaim(req: Request, user: AuthUser, claimId: string, decision: Decision, remarks: string) {
+const NOTIFICATION_TYPE_BY_DECISION: Record<Decision, "CLAIM_APPROVED" | "CLAIM_REJECTED" | "CLAIM_RETURNED"> = {
+  APPROVE: "CLAIM_APPROVED",
+  REJECT: "CLAIM_REJECTED",
+  RETURN: "CLAIM_RETURNED",
+};
+
+export async function decideClaim(
+  req: Request,
+  user: AuthUser,
+  claimId: string,
+  decision: Decision,
+  remarks: string,
+  approvedAmount?: number,
+) {
   if (!remarks?.trim()) {
     throw new ApiError(400, "Remarks are required for every approval decision");
   }
@@ -96,6 +111,17 @@ export async function decideClaim(req: Request, user: AuthUser, claimId: string,
     throw new ApiError(403, "Only this employee's assigned manager may approve their claim");
   }
 
+  // A manager may approve less than the full claimed amount - defaults to
+  // the full amount when not specified, so a plain Approve behaves exactly
+  // as before. Only meaningful for APPROVE; REJECT/RETURN never set it.
+  let resolvedApprovedAmount: number | null = null;
+  if (decision === "APPROVE") {
+    resolvedApprovedAmount = approvedAmount ?? Number(claim.totalAmount);
+    if (resolvedApprovedAmount <= 0 || resolvedApprovedAmount > Number(claim.totalAmount)) {
+      throw new ApiError(400, `Approved amount must be between ₹0 and the claimed amount (₹${claim.totalAmount})`);
+    }
+  }
+
   const nextStatus = STATUS_BY_DECISION[decision];
 
   const updatedClaim = await prisma.$transaction(async (tx) => {
@@ -105,7 +131,11 @@ export async function decideClaim(req: Request, user: AuthUser, claimId: string,
     // decisions for the same claim almost simultaneously).
     const { count } = await tx.claim.updateMany({
       where: { id: claim.id, status: "SUBMITTED" },
-      data: { status: nextStatus as never, currentApprovalStep: { increment: 1 } },
+      data: {
+        status: nextStatus as never,
+        currentApprovalStep: { increment: 1 },
+        approvedAmount: resolvedApprovedAmount,
+      },
     });
     if (count === 0) {
       throw new ApiError(409, "Claim was already processed by someone else");
@@ -117,11 +147,12 @@ export async function decideClaim(req: Request, user: AuthUser, claimId: string,
         approverRole: "MANAGER",
         approverId: user.id,
         action: decision,
+        approvedAmount: resolvedApprovedAmount,
         remarks,
         actedAt: new Date(),
       },
     });
-    return { status: nextStatus };
+    return { status: nextStatus, approvedAmount: resolvedApprovedAmount };
   });
 
   await recordAuditLog({
@@ -130,11 +161,17 @@ export async function decideClaim(req: Request, user: AuthUser, claimId: string,
     entityType: "Claim",
     entityId: claim.id,
     before: { status: claim.status },
-    after: { status: updatedClaim.status, remarks },
+    after: { status: updatedClaim.status, remarks, approvedAmount: updatedClaim.approvedAmount },
   });
 
-  // TODO(employee workstream / notifications): create a Notification row
-  // for claim.employeeId here so the employee sees the decision in real time.
+  const isPartialApproval = decision === "APPROVE" && resolvedApprovedAmount !== null && resolvedApprovedAmount < Number(claim.totalAmount);
+  const decisionVerb = decision === "APPROVE" ? (isPartialApproval ? `partially approved (₹${resolvedApprovedAmount} of ₹${claim.totalAmount})` : "approved") : decision === "REJECT" ? "rejected" : "returned";
+  await createNotification(
+    claim.employeeId,
+    NOTIFICATION_TYPE_BY_DECISION[decision],
+    decision === "APPROVE" ? (isPartialApproval ? "Claim partially approved" : "Claim approved") : decision === "REJECT" ? "Claim rejected" : "Claim returned for correction",
+    `Your manager ${decisionVerb} claim ${claim.claimNumber}: ${remarks}`,
+  );
 
   return updatedClaim;
 }

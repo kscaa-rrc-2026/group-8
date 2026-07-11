@@ -7,6 +7,7 @@ interface Claim {
   id: string;
   claimNumber: string;
   totalAmount: string;
+  approvedAmount: string | null;
   status: ClaimStatus;
   createdAt: string;
 }
@@ -62,7 +63,12 @@ export function ClaimHistory() {
             {claims.map((claim) => (
               <tr key={claim.id} className="border-t border-slate-100">
                 <td className="px-4 py-2 font-medium text-slate-700">{claim.claimNumber}</td>
-                <td className="px-4 py-2">₹{claim.totalAmount}</td>
+                <td className="px-4 py-2">
+                  ₹{claim.totalAmount}
+                  {claim.approvedAmount !== null && Number(claim.approvedAmount) < Number(claim.totalAmount) && (
+                    <div className="text-xs text-amber-600">Approved: ₹{claim.approvedAmount}</div>
+                  )}
+                </td>
                 <td className="px-4 py-2">
                   <StatusBadge status={claim.status} />
                 </td>

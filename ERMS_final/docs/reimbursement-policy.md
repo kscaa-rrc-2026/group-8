@@ -53,14 +53,23 @@ Employee submits → Manager approves → Accounts verifies → Paid
   no one else who could.
 - A manager's decision is one of three things, and every one of them
   requires written remarks:
-  - **Approve** — moves to Accounts for verification.
+  - **Approve** — moves to Accounts for verification. A manager may
+    approve **less than the full claimed amount** (e.g. one line item is
+    outside policy) — Accounts verification and eventual payment then
+    proceed against that approved amount, not the originally claimed
+    total. Approving the full amount (the default) behaves exactly as
+    before.
   - **Reject** — ends the claim's life; remarks are the reason on record.
   - **Return** — sends it back to the employee to fix and resubmit
-    (e.g. missing detail, wrong category). The employee can resubmit as
-    many times as needed; each resubmission re-enters the same manager's
-    queue.
+    (e.g. missing detail, wrong category). The employee can edit the
+    claim (line items and attachments) and resubmit as many times as
+    needed; each resubmission re-enters the same manager's queue.
 - Accounts verification is a second, independent check with the same
   approve/reject-with-remarks pattern, plus duplicate detection (below).
+- **Notifications**: the employee's assigned manager is notified when a
+  claim is submitted or resubmitted; the employee is notified on every
+  manager decision (approved — including how much, if partial — rejected,
+  or returned), on Accounts' verify/reject decision, and on payment.
 
 ## 5. Duplicate and fraud detection
 

@@ -36,12 +36,17 @@ docs/
 
 - **Full claim lifecycle**: Draft → Submit (blocked without a bill
   attachment) → Manager approval (maker-checker, strictly scoped to the
-  employee's actual assigned manager) → Accounts verification (with
-  duplicate/fraud detection that blocks payment on a flagged claim) →
-  Payment.
+  employee's actual assigned manager, and able to approve less than the
+  full claimed amount) → Accounts verification (with duplicate/fraud
+  detection that blocks payment on a flagged claim, against the approved
+  amount) → Payment. A returned claim can be edited (not just resubmitted
+  unchanged) in response to the manager's remarks.
 - **Role-based dashboards**: Employee, Manager, Accounts, Admin, and CEO
   (the only role permitted to approve its own claim, since it has no
   manager above it).
+- **Notifications**: the manager is notified when a direct report submits
+  or resubmits a claim; the employee is notified on every manager/Accounts
+  decision and on payment.
 - **Security**: bcrypt password hashing, enforced password strength policy,
   mandatory password change on first login/after a reset, session idle
   timeout backed by the database (not a static JWT expiry), and session

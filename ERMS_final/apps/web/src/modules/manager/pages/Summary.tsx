@@ -10,6 +10,7 @@ interface SummaryClaim {
   claimNumber: string;
   employeeName: string;
   totalAmount: string;
+  approvedAmount: string | null;
   decision: Decision;
   currentStatus: ClaimStatus;
   remarks: string;
@@ -101,7 +102,12 @@ export function Summary() {
               <tr key={claim.id} className="border-t border-slate-100">
                 <td className="px-4 py-2 font-medium text-slate-700">{claim.claimNumber}</td>
                 <td className="px-4 py-2">{claim.employeeName}</td>
-                <td className="px-4 py-2">₹{claim.totalAmount}</td>
+                <td className="px-4 py-2">
+                  ₹{claim.totalAmount}
+                  {claim.decision === "APPROVE" && claim.approvedAmount !== null && Number(claim.approvedAmount) < Number(claim.totalAmount) && (
+                    <div className="text-xs text-amber-600">Approved: ₹{claim.approvedAmount}</div>
+                  )}
+                </td>
                 <td className="px-4 py-2">
                   <span className={DECISION_BADGE[claim.decision]}>{DECISION_LABEL[claim.decision]}</span>
                 </td>
